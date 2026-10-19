@@ -6,7 +6,7 @@ from llama_index.core.schema import NodeWithScore
 from llama_index.llms.openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
-from parserag.config import LLM_MODEL, openai_api_key
+from parserag.config import LLM_MODEL, LLM_TIMEOUT, openai_api_key
 
 
 class Citation(BaseModel):
@@ -32,7 +32,7 @@ Context:
 
 
 def generate_answer(question: str, nodes: list[NodeWithScore]) -> dict:
-    llm = OpenAI(model=LLM_MODEL, api_key=openai_api_key(), temperature=0)
+    llm = OpenAI(model=LLM_MODEL, api_key=openai_api_key(), temperature=0, timeout=LLM_TIMEOUT)
     prompt = PROMPT.format(question=question, context=_format_context(nodes))
     structured = getattr(llm, "as_structured_llm", None)
     if structured is not None:

@@ -33,15 +33,38 @@ def test_recall_at_k_page_and_doc() -> None:
         },
     ]
     result = score_predictions(records, k=8)
-    assert result["n"] == 3
-    assert result["page_hits"] == 2
-    assert result["doc_hits"] == 3
-    assert result["recall_at_k"] == 2 / 3
-    assert result["doc_recall_at_k"] == 1.0
+    overall = result["overall"]
+    assert overall["retrieval_queries_scored"] == 3
+    assert overall["page_hits"] == 2
+    assert overall["doc_hits"] == 3
+    assert overall["recall_at_k"] == 2 / 3
+    assert overall["doc_recall_at_k"] == 1.0
 
     truncated = score_predictions(records, k=1)
-    assert truncated["page_hits"] == 1
-    assert truncated["doc_hits"] == 2
+    assert truncated["overall"]["page_hits"] == 1
+    assert truncated["overall"]["doc_hits"] == 2
+
+
+def test_answer_and_ranked_retrieval_metrics() -> None:
+    records = [
+        {
+            "question_id": "q1",
+            "domain": "numeric",
+            "gold_answers": ["$1,234 million"],
+            "answer": {"answer": "$1,234 million"},
+            "gold_pages": [{"doc_id": "d", "page": 2}],
+            "retrieved": [
+                {"doc_id": "d", "page": 2},
+                {"doc_id": "d", "page": 2},
+                {"doc_id": "x", "page": 1},
+            ],
+        }
+    ]
+    result = score_predictions(records)
+    assert result["overall"]["em"] == 1.0
+    assert result["overall"]["numeric_match"] == 1.0
+    assert result["overall"]["retrieval_metrics"]["recall@3"] == 1.0
+    assert result["per_domain"]["numeric"]["question_count"] == 1
 
 
 def test_failure_list_replaces_and_drops() -> None:
@@ -58,5 +81,6 @@ def test_failure_list_replaces_and_drops() -> None:
 if __name__ == "__main__":
     test_rrf_shared_doc_ranks_first()
     test_recall_at_k_page_and_doc()
+    test_answer_and_ranked_retrieval_metrics()
     test_failure_list_replaces_and_drops()
     print("ok")

@@ -20,6 +20,6 @@ Each dataset gets `data/indexes/{dataset}/`:
 - `indexed.json` — doc ids already embedded, so ingest can resume.
 - `failures.json` — parses that did not make it into the index. Written after each failure, so it is still there if ingest is interrupted. Removed when the list is empty.
 
-Chroma does **not** store raw text. Building BM25 from the vector index alone would yield an empty corpus. The docstore is the source of truth for `BM25Retriever`.
+The docstore is the source of truth for `BM25Retriever`. Reload it with `VectorStoreIndex(nodes=[], storage_context=...)`. `from_vector_store()` drops the docstore, and BM25 then indexes an empty corpus.
 
 On ingest, nodes are inserted incrementally and the docstore/manifest are persisted after each PDF.

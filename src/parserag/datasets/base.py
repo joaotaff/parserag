@@ -20,6 +20,9 @@ class Question:
     question_id: str
     question: str
     gold_pages: list[GoldPage] = field(default_factory=list)
+    gold_answers: list[str] = field(default_factory=list)
+    domain: str = "unknown"
+    metadata: dict = field(default_factory=dict)
 
 
 class DatasetAdapter(ABC):

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ RESULTS_DIR = ROOT / "results"
 
 EMBED_MODEL = "text-embedding-3-small"
 LLM_MODEL = "gpt-4o-mini"
+LLM_TIMEOUT = 180
 RETRIEVER_K = 20
 FUSED_K = 8
 RRF_K = 60
@@ -41,7 +43,7 @@ def configure_llama_index() -> None:
     from llama_index.llms.openai import OpenAI
 
     Settings.embed_model = OpenAIEmbedding(model=EMBED_MODEL, api_key=openai_api_key())
-    Settings.llm = OpenAI(model=LLM_MODEL, api_key=openai_api_key(), temperature=0)
+    Settings.llm = OpenAI(model=LLM_MODEL, api_key=openai_api_key(), temperature=0, timeout=LLM_TIMEOUT)
 
 
 def pdf_dir(dataset: str) -> Path:
@@ -60,6 +62,31 @@ def index_dir(dataset: str) -> Path:
     path = INDEX_DIR / dataset
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def run_paths(dataset: str, timestamp: str | None = None) -> tuple[Path, Path]:
+    timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = RESULTS_DIR / dataset / "run"
+    path.mkdir(parents=True, exist_ok=True)
+    stem = f"{dataset}_{timestamp}"
+    return path / f"{stem}.jsonl", path / f"{stem}.json"
+
+
+def latest_run_path(dataset: str) -> Path:
+    path = RESULTS_DIR / dataset / "run"
+    snapshots = sorted(path.glob(f"{dataset}_*.json"), key=lambda item: item.stat().st_mtime)
+    if snapshots:
+        return snapshots[-1]
+    legacy = path / "predictions.jsonl"
+    if legacy.exists():
+        return legacy
+    raise FileNotFoundError(f"No run output for {dataset}. Run the dataset first.")
+
+
+def eval_path(dataset: str, run_path: Path) -> Path:
+    path = RESULTS_DIR / dataset / "eval"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / f"{run_path.stem}.metrics.json"
 
 
 def _safe_id(doc_id: str) -> str:

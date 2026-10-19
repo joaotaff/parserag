@@ -57,6 +57,9 @@ class DudeAdapter(DatasetAdapter):
                     question_id=str(row["questionId"]),
                     question=row["question"],
                     gold_pages=_gold_pages(doc_id, row),
+                    gold_answers=[str(answer) for answer in row.get("answers") or []],
+                    domain=str(row.get("answer_type") or "unknown"),
+                    metadata={"doc_id": doc_id},
                 )
             )
             if limit and len(questions) >= limit:

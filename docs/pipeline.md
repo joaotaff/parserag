@@ -1,6 +1,6 @@
 # Pipeline
 
-ParseRag is a hybrid RAG loop: LlamaParse turns PDFs into markdown pages, Chroma stores dense embeddings, BM25 stores the same nodes as text, Reciprocal Rank Fusion (RRF) merges the two ranked lists, and `gpt-4o-mini` writes a JSON answer. Evaluation in v1 scores **retrieval only**.
+ParseRag is a hybrid RAG loop: LlamaParse turns PDFs into markdown pages, Chroma stores dense embeddings, BM25 stores the same nodes as text, Reciprocal Rank Fusion (RRF) merges the two ranked lists, and `gpt-4o-mini` writes a JSON answer. Evaluation scores retrieval and rule-based answer quality.
 
 ```
 PDFs -> LlamaParse (cached) -> page nodes
@@ -18,12 +18,14 @@ From the repo root, with `OPENAI_API_KEY` and `LLAMA_CLOUD_API_KEY` in `.env`:
 python -m venv .venv
 .venv\Scripts\python -m pip install -e .
 .venv\Scripts\python -m parserag ingest --dataset financebench
-.venv\Scripts\python -m parserag run --dataset financebench --out results/financebench.jsonl
-.venv\Scripts\python -m parserag eval --pred results/financebench.jsonl
+.venv\Scripts\python -m parserag run --dataset financebench
+.venv\Scripts\python -m parserag eval --dataset financebench
 .venv\Scripts\python tests/test_retrieval.py
 ```
 
 On Unix, use `.venv/bin/python` instead of `.venv\Scripts\python`.
+
+Run writes timestamped files under `results/<dataset>/run/`: a JSONL checkpoint updated after every question and a PageIndex-style JSON snapshot containing `run_config` and `results`. Eval scores the latest snapshot and writes a timestamp-matched `.metrics.json` under `results/<dataset>/eval/`.
 
 `--limit N` caps unique PDFs on ingest and questions on run (smoke tests). `--rebuild` wipes the Chroma collection and docstore for that dataset.
 

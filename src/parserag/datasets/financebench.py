@@ -49,6 +49,13 @@ class FinanceBenchAdapter(DatasetAdapter):
                     question_id=str(row["financebench_id"]),
                     question=row["question"],
                     gold_pages=gold,
+                    gold_answers=[str(row["answer"])],
+                    domain=str(row.get("question_type") or "unknown"),
+                    metadata={
+                        "company": row.get("company"),
+                        "doc_name": row.get("doc_name"),
+                        "question_reasoning": row.get("question_reasoning"),
+                    },
                 )
             )
             if limit and len(questions) >= limit:

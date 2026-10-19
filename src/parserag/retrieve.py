@@ -41,6 +41,7 @@ def retrieved_records(nodes: list[NodeWithScore]) -> list[dict]:
         meta = node.node.metadata or {}
         records.append(
             {
+                "node_id": node.node.node_id,
                 "doc_id": meta.get("doc_id"),
                 "page": meta.get("page"),
                 "score": node.score,

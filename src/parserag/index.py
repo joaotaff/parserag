@@ -69,15 +69,18 @@ def load_index(name: str) -> VectorStoreIndex:
     paths = _paths(name)
     if not paths["docstore"].exists():
         raise FileNotFoundError(f"No index for {name}. Run ingest first.")
-    db = chromadb.PersistentClient(path=str(paths["chroma"]))
-    collection = db.get_or_create_collection(name)
-    vector_store = ChromaVectorStore(chroma_collection=collection)
-    docstore = SimpleDocumentStore.from_persist_path(str(paths["docstore"]))
-    storage = StorageContext.from_defaults(docstore=docstore, vector_store=vector_store)
-    return VectorStoreIndex.from_vector_store(vector_store, storage_context=storage)
+    index, _ = _open_index(name)
+    if not index.docstore.docs:
+        raise RuntimeError(f"Docstore for {name} has no nodes. Re-run ingest.")
+    return index
 
 
 def load_or_create_index(name: str, rebuild: bool = False) -> tuple[VectorStoreIndex, set[str]]:
+    return _open_index(name, rebuild=rebuild)
+
+
+def _open_index(name: str, rebuild: bool = False) -> tuple[VectorStoreIndex, set[str]]:
+    # from_vector_store() discards storage_context, so BM25 would see an empty docstore.
     paths = _paths(name)
     if rebuild:
         _clear_index(paths)
@@ -86,17 +89,13 @@ def load_or_create_index(name: str, rebuild: bool = False) -> tuple[VectorStoreI
     vector_store = ChromaVectorStore(chroma_collection=collection)
     if paths["docstore"].exists() and not rebuild:
         docstore = SimpleDocumentStore.from_persist_path(str(paths["docstore"]))
-        storage = StorageContext.from_defaults(docstore=docstore, vector_store=vector_store)
-        index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage)
-        return index, _load_manifest(paths["manifest"])
-    docstore = SimpleDocumentStore()
+        indexed = _load_manifest(paths["manifest"])
+    else:
+        docstore = SimpleDocumentStore()
+        indexed = set()
     storage = StorageContext.from_defaults(docstore=docstore, vector_store=vector_store)
-    index = VectorStoreIndex(
-        nodes=[],
-        storage_context=storage,
-        store_nodes_override=True,
-    )
-    return index, set()
+    index = VectorStoreIndex(nodes=[], storage_context=storage, store_nodes_override=True)
+    return index, indexed
 
 
 def _persist(name: str, index: VectorStoreIndex, indexed: set[str]) -> None:
