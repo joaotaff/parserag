@@ -1,0 +1,44 @@
+# Pipeline
+
+ParseRag is a hybrid RAG loop: LlamaParse turns PDFs into markdown pages, Chroma stores dense embeddings, BM25 stores the same nodes as text, Reciprocal Rank Fusion (RRF) merges the two ranked lists, and `gpt-4o-mini` writes a JSON answer. Evaluation in v1 scores **retrieval only**.
+
+```
+PDFs -> LlamaParse (cached) -> page nodes
+                              -> Chroma (dense)
+                              -> SimpleDocumentStore (BM25)
+Question -> Chroma top-20 + BM25 top-20 -> RRF top-8 -> LLM JSON -> JSONL
+JSONL -> Recall@k on gold (doc_id, page)
+```
+
+## Commands
+
+From the repo root, with `OPENAI_API_KEY` and `LLAMA_CLOUD_API_KEY` in `.env`:
+
+```bash
+python -m venv .venv
+.venv\Scripts\python -m pip install -e .
+.venv\Scripts\python -m parserag ingest --dataset financebench
+.venv\Scripts\python -m parserag run --dataset financebench --out results/financebench.jsonl
+.venv\Scripts\python -m parserag eval --pred results/financebench.jsonl
+.venv\Scripts\python tests/test_retrieval.py
+```
+
+On Unix, use `.venv/bin/python` instead of `.venv\Scripts\python`.
+
+`--limit N` caps unique PDFs on ingest and questions on run (smoke tests). `--rebuild` wipes the Chroma collection and docstore for that dataset.
+
+DUDE validation is ~749 PDFs / ~6.3k questions. Ingest it the same way (`--dataset dude`) only after FinanceBench has proven the loop; LlamaParse credits and time add up.
+
+## Defaults
+
+| Setting | Value |
+| --- | --- |
+| Embeddings | `text-embedding-3-small` |
+| LLM | `gpt-4o-mini` |
+| Per-retriever k | 20 |
+| Fused top-k | 8 |
+| RRF k | 60 |
+| Chunk size / overlap | 1024 / 128 |
+| Query rewriting | off (`num_queries=1`) |
+
+Datasets use **separate** indexes. Each question retrieves over **all documents in that dataset**, not the gold PDF only.

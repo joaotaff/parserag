@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+
+import chromadb
+from llama_index.core import StorageContext, VectorStoreIndex
+from llama_index.core.storage.docstore import SimpleDocumentStore
+from llama_index.vector_stores.chroma import ChromaVectorStore
+
+from parserag.config import configure_llama_index, index_dir
+from parserag.datasets import get_adapter
+from parserag.parse import parse_to_nodes
+
+log = logging.getLogger(__name__)
+
+
+def ingest_dataset(name: str, limit: int | None = None, rebuild: bool = False) -> None:
+    configure_llama_index()
+    adapter = get_adapter(name)
+    adapter.prepare_pdfs(limit=limit)
+    docs = adapter.iter_documents(limit=limit)
+    index, indexed = load_or_create_index(name, rebuild=rebuild)
+    for doc in docs:
+        if not rebuild and doc.doc_id in indexed:
+            log.info("Skip already indexed %s", doc.doc_id)
+            continue
+        try:
+            nodes = parse_to_nodes(name, doc.doc_id, doc.pdf_path)
+        except Exception:
+            log.exception("Parse failed for %s:%s — skipping", name, doc.doc_id)
+            continue
+        if not nodes:
+            log.warning("No text nodes for %s:%s", name, doc.doc_id)
+            continue
+        index.insert_nodes(nodes)
+        indexed.add(doc.doc_id)
+        _persist(name, index, indexed)
+        log.info("Indexed %s (%d nodes)", doc.doc_id, len(nodes))
+
+
+def load_index(name: str) -> VectorStoreIndex:
+    configure_llama_index()
+    paths = _paths(name)
+    if not paths["docstore"].exists():
+        raise FileNotFoundError(f"No index for {name}. Run ingest first.")
+    db = chromadb.PersistentClient(path=str(paths["chroma"]))
+    collection = db.get_or_create_collection(name)
+    vector_store = ChromaVectorStore(chroma_collection=collection)
+    docstore = SimpleDocumentStore.from_persist_path(str(paths["docstore"]))
+    storage = StorageContext.from_defaults(docstore=docstore, vector_store=vector_store)
+    return VectorStoreIndex.from_vector_store(vector_store, storage_context=storage)
+
+
+def load_or_create_index(name: str, rebuild: bool = False) -> tuple[VectorStoreIndex, set[str]]:
+    paths = _paths(name)
+    if rebuild:
+        _clear_index(paths)
+    db = chromadb.PersistentClient(path=str(paths["chroma"]))
+    collection = db.get_or_create_collection(name)
+    vector_store = ChromaVectorStore(chroma_collection=collection)
+    if paths["docstore"].exists() and not rebuild:
+        docstore = SimpleDocumentStore.from_persist_path(str(paths["docstore"]))
+        storage = StorageContext.from_defaults(docstore=docstore, vector_store=vector_store)
+        index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage)
+        return index, _load_manifest(paths["manifest"])
+    docstore = SimpleDocumentStore()
+    storage = StorageContext.from_defaults(docstore=docstore, vector_store=vector_store)
+    index = VectorStoreIndex(
+        nodes=[],
+        storage_context=storage,
+        store_nodes_override=True,
+    )
+    return index, set()
+
+
+def _persist(name: str, index: VectorStoreIndex, indexed: set[str]) -> None:
+    paths = _paths(name)
+    index.docstore.persist(persist_path=str(paths["docstore"]))
+    paths["manifest"].write_text(json.dumps(sorted(indexed)), encoding="utf-8")
+
+
+def _paths(name: str) -> dict[str, Path]:
+    root = index_dir(name)
+    return {
+        "chroma": root / "chroma",
+        "docstore": root / "docstore.json",
+        "manifest": root / "indexed.json",
+    }
+
+
+def _load_manifest(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return set(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _clear_index(paths: dict[str, Path]) -> None:
+    import shutil
+
+    if paths["chroma"].exists():
+        shutil.rmtree(paths["chroma"])
+    for key in ("docstore", "manifest"):
+        if paths[key].exists():
+            paths[key].unlink()
