@@ -16,28 +16,52 @@ from parserag.parse import parse_to_nodes
 log = logging.getLogger(__name__)
 
 
-def ingest_dataset(name: str, limit: int | None = None, rebuild: bool = False) -> None:
+def ingest_dataset(name: str, limit: int | None = None, rebuild: bool = False) -> list[dict]:
+    """Index the dataset. Returns parse failures still outstanding."""
     configure_llama_index()
     adapter = get_adapter(name)
     adapter.prepare_pdfs(limit=limit)
     docs = adapter.iter_documents(limit=limit)
     index, indexed = load_or_create_index(name, rebuild=rebuild)
+    failures = [] if rebuild else _load_failures(_paths(name)["failures"])
     for doc in docs:
         if not rebuild and doc.doc_id in indexed:
             log.info("Skip already indexed %s", doc.doc_id)
             continue
         try:
             nodes = parse_to_nodes(name, doc.doc_id, doc.pdf_path)
-        except Exception:
+        except Exception as exc:
             log.exception("Parse failed for %s:%s — skipping", name, doc.doc_id)
+            failures = record_failure(failures, doc.doc_id, f"{type(exc).__name__}: {exc}")
+            _write_failures(name, failures)
             continue
         if not nodes:
-            log.warning("No text nodes for %s:%s", name, doc.doc_id)
+            log.error("No text extracted for %s:%s", name, doc.doc_id)
+            failures = record_failure(
+                failures,
+                doc.doc_id,
+                "no text extracted; delete its pages.json cache to force a reparse",
+            )
+            _write_failures(name, failures)
             continue
         index.insert_nodes(nodes)
         indexed.add(doc.doc_id)
+        failures = drop_failure(failures, doc.doc_id)
         _persist(name, index, indexed)
+        _write_failures(name, failures)
         log.info("Indexed %s (%d nodes)", doc.doc_id, len(nodes))
+    _report_failures(name, failures)
+    return failures
+
+
+def record_failure(rows: list[dict], doc_id: str, error: str) -> list[dict]:
+    kept = [row for row in rows if row["doc_id"] != doc_id]
+    kept.append({"doc_id": doc_id, "error": error})
+    return kept
+
+
+def drop_failure(rows: list[dict], doc_id: str) -> list[dict]:
+    return [row for row in rows if row["doc_id"] != doc_id]
 
 
 def load_index(name: str) -> VectorStoreIndex:
@@ -87,6 +111,7 @@ def _paths(name: str) -> dict[str, Path]:
         "chroma": root / "chroma",
         "docstore": root / "docstore.json",
         "manifest": root / "indexed.json",
+        "failures": root / "failures.json",
     }
 
 
@@ -96,11 +121,34 @@ def _load_manifest(path: Path) -> set[str]:
     return set(json.loads(path.read_text(encoding="utf-8")))
 
 
+def _load_failures(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_failures(name: str, failures: list[dict]) -> None:
+    path = _paths(name)["failures"]
+    if failures:
+        path.write_text(json.dumps(failures, indent=2), encoding="utf-8")
+    elif path.exists():
+        path.unlink()
+
+
+def _report_failures(name: str, failures: list[dict]) -> None:
+    if not failures:
+        log.info("Ingest finished with no outstanding parse failures")
+        return
+    path = _paths(name)["failures"]
+    lines = "\n".join(f"  {row['doc_id']}: {row['error']}" for row in failures)
+    log.error("Ingest finished with %d parse failure(s). See %s\n%s", len(failures), path, lines)
+
+
 def _clear_index(paths: dict[str, Path]) -> None:
     import shutil
 
     if paths["chroma"].exists():
         shutil.rmtree(paths["chroma"])
-    for key in ("docstore", "manifest"):
+    for key in ("docstore", "manifest", "failures"):
         if paths[key].exists():
             paths[key].unlink()

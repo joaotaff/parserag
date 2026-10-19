@@ -44,34 +44,31 @@ def load_pages(dataset: str, doc_id: str, pdf_path: Path) -> list[dict]:
 
 
 def _parse_pdf(pdf_path: Path) -> list[dict]:
-    parser = _llama_parse()
-    if hasattr(parser, "get_json_result"):
-        return _pages_from_json(parser.get_json_result(str(pdf_path)))
-    if hasattr(parser, "parse"):
-        return _pages_from_json(parser.parse(str(pdf_path)))
-    docs = parser.load_data(str(pdf_path))
-    return [{"page": i + 1, "text": doc.text} for i, doc in enumerate(docs)]
+    # JSON carries an explicit page number per page. The download includes layout
+    # data, so a long filing can sit on this call for several minutes.
+    log.info("Downloading LlamaParse JSON for %s", pdf_path.name)
+    raw = _llama_parse().get_json_result(str(pdf_path))
+    pages = _pages_from_json(raw)
+    if not pages:
+        raise RuntimeError(f"LlamaParse returned no pages for {pdf_path}")
+    return pages
 
 
 def _llama_parse():
-    try:
-        from llama_cloud_services import LlamaParse
-    except ImportError:
-        from llama_parse import LlamaParse  # type: ignore
+    from llama_cloud_services import LlamaParse
 
     return LlamaParse(
         api_key=llama_cloud_api_key(),
         result_type="markdown",
-        split_by_page=True,
+        ignore_errors=False,
         verbose=False,
     )
 
 
 def _pages_from_json(raw) -> list[dict]:
     job = raw[0] if isinstance(raw, list) and raw else raw
-    pages = _extract_pages(job)
     out: list[dict] = []
-    for i, page in enumerate(pages):
+    for i, page in enumerate(_extract_pages(job)):
         num, text = _page_fields(page, i)
         out.append({"page": int(num), "text": text or ""})
     if out and min(item["page"] for item in out) == 0:

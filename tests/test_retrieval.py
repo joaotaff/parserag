@@ -1,6 +1,7 @@
 """RRF ranking + Recall@k oracle. Run: python tests/test_retrieval.py"""
 
 from parserag.eval_retrieval import score_predictions
+from parserag.index import drop_failure, record_failure
 from parserag.retrieve import rrf_fuse
 
 
@@ -43,7 +44,19 @@ def test_recall_at_k_page_and_doc() -> None:
     assert truncated["doc_hits"] == 2
 
 
+def test_failure_list_replaces_and_drops() -> None:
+    rows = record_failure([], "a", "RuntimeError: boom")
+    rows = record_failure(rows, "a", "RuntimeError: again")
+    rows = record_failure(rows, "b", "no text extracted")
+    assert rows == [
+        {"doc_id": "a", "error": "RuntimeError: again"},
+        {"doc_id": "b", "error": "no text extracted"},
+    ]
+    assert drop_failure(rows, "a") == [{"doc_id": "b", "error": "no text extracted"}]
+
+
 if __name__ == "__main__":
     test_rrf_shared_doc_ranks_first()
     test_recall_at_k_page_and_doc()
+    test_failure_list_replaces_and_drops()
     print("ok")

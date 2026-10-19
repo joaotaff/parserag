@@ -36,7 +36,9 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     if args.cmd == "ingest":
-        ingest_dataset(args.dataset, limit=args.limit, rebuild=args.rebuild)
+        failures = ingest_dataset(args.dataset, limit=args.limit, rebuild=args.rebuild)
+        if failures:
+            raise SystemExit(1)
     elif args.cmd == "run":
         cmd_run(args.dataset, Path(args.out), limit=args.limit)
     elif args.cmd == "eval":

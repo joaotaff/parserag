@@ -38,7 +38,7 @@ def score_predictions(records: list[dict], k: int | None = None) -> dict:
 
 def load_jsonl(path: Path) -> list[dict]:
     records = []
-    with path.open(encoding="utf-8") as handle:
+    with path.open(encoding="utf-8-sig") as handle:
         for line in handle:
             line = line.strip()
             if line:
