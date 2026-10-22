@@ -10,6 +10,8 @@ Question -> Chroma top-20 + BM25 top-20 -> RRF top-8 -> LLM JSON -> JSONL
 JSONL -> Recall@k on gold (doc_id, page)
 ```
 
+How a PDF becomes cached markdown and page nodes is in `docs/parsing.md`.
+
 ## Commands
 
 From the repo root, with `OPENAI_API_KEY` and `LLAMA_CLOUD_API_KEY` in `.env`:

@@ -2,6 +2,8 @@
 
 ## LlamaParse cache
 
+How a PDF becomes `pages.json` and then nodes is described in `docs/parsing.md`.
+
 `data/parsed/{dataset}/{doc_id}/pages.json` stores `[{page, text}, ...]` markdown pages.
 
 - A cache hit never calls LlamaParse.
