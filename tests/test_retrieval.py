@@ -67,6 +67,26 @@ def test_answer_and_ranked_retrieval_metrics() -> None:
     assert result["per_domain"]["numeric"]["question_count"] == 1
 
 
+def test_retrieval_only_records_skip_answer_metrics() -> None:
+    records = [
+        {
+            "question_id": "q1",
+            "domain": "numeric",
+            "gold_answers": ["42"],
+            "answer_generation_enabled": False,
+            "gold_pages": [{"doc_id": "d", "page": 2}],
+            "retrieved": [{"doc_id": "d", "page": 2}],
+        }
+    ]
+    result = score_predictions(records)
+    assert result["overall"]["num_valid_answer"] == 0
+    assert result["overall"]["retrieval_queries_scored"] == 1
+    assert result["overall"]["recall_at_k"] == 1.0
+    assert result["per_question"][0]["em"] is None
+    assert result["per_question"][0]["f1"] is None
+    assert result["per_question"][0]["numeric_match"] is None
+
+
 def test_failure_list_replaces_and_drops() -> None:
     rows = record_failure([], "a", "RuntimeError: boom")
     rows = record_failure(rows, "a", "RuntimeError: again")
@@ -82,5 +102,6 @@ if __name__ == "__main__":
     test_rrf_shared_doc_ranks_first()
     test_recall_at_k_page_and_doc()
     test_answer_and_ranked_retrieval_metrics()
+    test_retrieval_only_records_skip_answer_metrics()
     test_failure_list_replaces_and_drops()
     print("ok")

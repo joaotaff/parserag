@@ -29,7 +29,7 @@ On Unix, use `.venv/bin/python` instead of `.venv\Scripts\python`.
 
 Run writes timestamped files under `results/<dataset>/run/`: a JSONL checkpoint updated after every question and a PageIndex-style JSON snapshot containing `run_config` and `results`. Eval scores the latest snapshot and writes a timestamp-matched `.metrics.json` under `results/<dataset>/eval/`.
 
-`--limit N` caps unique PDFs on ingest and questions on run (smoke tests). `--rebuild` wipes the Chroma collection and docstore for that dataset.
+`--limit N` caps unique PDFs on ingest and questions on run (smoke tests). `--rebuild` wipes the Chroma collection and docstore for that dataset. Pass `--no-generate` to `run` to retrieve and write retrieval-only records without calling the answer LLM.
 
 DUDE validation is ~749 PDFs / ~6.3k questions. Ingest it the same way (`--dataset dude`) only after FinanceBench has proven the loop; LlamaParse credits and time add up.
 

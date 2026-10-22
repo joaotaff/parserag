@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--dataset", required=True, choices=["financebench", "dude"])
     run.add_argument("--out", default=None, help="Snapshot JSON (a sibling JSONL checkpoint is also written)")
     run.add_argument("--limit", type=int, default=None, help="Max questions")
+    run.add_argument("--no-generate", action="store_true", help="Retrieve without generating answers")
 
     ev = sub.add_parser("eval", help="Score a run JSON/JSONL")
     ev.add_argument("--dataset", required=True, choices=["financebench", "dude"])
@@ -63,7 +64,14 @@ def main(argv: list[str] | None = None) -> None:
             checkpoint = snapshot.with_suffix(".jsonl")
         else:
             checkpoint, snapshot = run_paths(args.dataset, timestamp)
-        if cmd_run(args.dataset, checkpoint, snapshot, timestamp, limit=args.limit):
+        if cmd_run(
+            args.dataset,
+            checkpoint,
+            snapshot,
+            timestamp,
+            limit=args.limit,
+            generate=not args.no_generate,
+        ):
             raise SystemExit(1)
     elif args.cmd == "eval":
         pred = Path(args.pred) if args.pred else latest_run_path(args.dataset)
@@ -81,6 +89,7 @@ def cmd_run(
     snapshot: Path,
     timestamp: str,
     limit: int | None = None,
+    generate: bool = True,
 ) -> int:
     """Write crash-safe JSONL during the run and a PageIndex-style JSON snapshot."""
     started = time.perf_counter()
@@ -97,22 +106,24 @@ def cmd_run(
             question_started = time.perf_counter()
             pipeline_error = None
             nodes = []
+            answer = {}
             try:
                 nodes = retriever.retrieve(question.question)
-                answer = generate_answer(question.question, nodes)
+                if generate:
+                    answer = generate_answer(question.question, nodes)
             except Exception as exc:
                 failed += 1
                 log.exception("Pipeline failed for %s", question.question_id)
                 pipeline_error = f"{type(exc).__name__}: {exc}"
-                answer = {"answer": "", "citations": [], "error": f"{type(exc).__name__}: {exc}"}
+                if generate:
+                    answer = {"answer": "", "citations": [], "error": pipeline_error}
             retrieved = retrieved_records(nodes)
             latency_ms = round((time.perf_counter() - question_started) * 1000, 1)
             record = {
                 "dataset": dataset,
                 "question_id": question.question_id,
                 "question": question.question,
-                "answer": answer,
-                "predicted_answer": answer.get("answer", ""),
+                "answer_generation_enabled": generate,
                 "gold_answers": question.gold_answers,
                 "gold_pages": [{"doc_id": g.doc_id, "page": g.page} for g in question.gold_pages],
                 "domain": question.domain,
@@ -129,6 +140,9 @@ def cmd_run(
                 "pipeline_error": pipeline_error,
                 "k": FUSED_K,
             }
+            if generate:
+                record["answer"] = answer
+                record["predicted_answer"] = answer.get("answer", "")
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
             handle.flush()
             results.append(record)
@@ -140,6 +154,7 @@ def cmd_run(
         "checkpoint_path": str(checkpoint),
         "timestamp": timestamp,
         "model": LLM_MODEL,
+        "answer_generation_enabled": generate,
         "embedding_model": EMBED_MODEL,
         "index_dir": f"data/indexes/{dataset}",
         "limit": limit,

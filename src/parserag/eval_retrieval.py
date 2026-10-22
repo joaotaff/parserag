@@ -34,7 +34,11 @@ def score_predictions(
 
 def _aggregate(records: list[dict], primary_k: int, ks: tuple[int, ...]) -> dict:
     retrieval_records = [record for record in records if record.get("gold_pages")]
-    answer_records = [record for record in records if record.get("gold_answers")]
+    answer_records = [
+        record
+        for record in records
+        if record.get("gold_answers") and record.get("answer_generation_enabled", True)
+    ]
     page_hits = sum(_page_hit(record, primary_k) for record in retrieval_records)
     doc_hits = sum(_doc_hit(record, primary_k) for record in retrieval_records)
     ems, f1s, numeric = zip(
@@ -88,7 +92,10 @@ def _retrieval_at_ks(records: list[dict], ks: tuple[int, ...]) -> dict:
 
 
 def _per_question(record: dict, k: int) -> dict:
-    em, f1, numeric = _answer_scores(record)
+    answer_scored = bool(
+        record.get("gold_answers") and record.get("answer_generation_enabled", True)
+    )
+    em, f1, numeric = _answer_scores(record) if answer_scored else (None, None, None)
     has_gold_pages = bool(record.get("gold_pages"))
     return {
         "question_id": record.get("question_id"),

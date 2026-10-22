@@ -22,7 +22,7 @@ Each run record contains:
 }
 ```
 
-The actual record also includes gold answers, domain/type metadata, a joined retrieved context, retrieved document/node/page IDs, latency, retrieval count, and `pipeline_error`. `retrieved` is the RRF-fused list sent to the LLM (`fused_k`, default 8).
+The actual record also includes gold answers, domain/type metadata, a joined retrieved context, retrieved document/node/page IDs, latency, retrieval count, and `pipeline_error`. `retrieved` is the RRF-fused list sent to the LLM (`fused_k`, default 8). Runs created with `--no-generate` mark answer generation as disabled and omit `answer` and `predicted_answer`.
 
 ## Recall@k
 
@@ -35,7 +35,7 @@ A question **counts** only if `gold_pages` is non-empty.
 - **recall_at_k** (page): hit if any gold `(doc_id, page)` appears in the fused top-k.
 - **doc_recall_at_k**: hit if any gold `doc_id` appears, ignoring page.
 - **precision/recall/nDCG@3,5,10**: binary relevance over unique `(doc_id, page)` results.
-- **EM/F1/numeric_match**: rule-based answer metrics against dataset gold answers.
+- **EM/F1/numeric_match**: rule-based answer metrics against dataset gold answers. Retrieval-only records are excluded from these metrics and report `null` per-question answer scores.
 
 Metrics are reported overall, per dataset domain/type, and per question. `--k` changes the primary Recall@k; ranked metrics remain at 3, 5, and 10. An LLM judge is deliberately not included.
 
