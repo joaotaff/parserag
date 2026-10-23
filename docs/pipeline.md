@@ -31,6 +31,8 @@ Run writes timestamped files under `results/<dataset>/run/`: a JSONL checkpoint 
 
 `--limit N` caps unique PDFs on ingest and questions on run (smoke tests). `--rebuild` wipes the Chroma collection and docstore for that dataset. Pass `--no-generate` to `run` to retrieve and write retrieval-only records without calling the answer LLM.
 
+Pass the same `--parse-tier` value to `ingest` and `run` to use a separate parse cache and index for `fast`, `cost_effective`, `agentic`, or `agentic_plus`. Omit it or pass `none` for the API's accurate default and the existing paths. With no `--pred`, `eval --parse-tier ...` picks the newest completed run for that tier; missing `parse_tier` on an older run counts as the default.
+
 DUDE validation is ~749 PDFs / ~6.3k questions. Ingest it the same way (`--dataset dude`) only after FinanceBench has proven the loop; LlamaParse credits and time add up.
 
 ## Defaults
@@ -43,6 +45,8 @@ DUDE validation is ~749 PDFs / ~6.3k questions. Ingest it the same way (`--datas
 | Fused top-k | 8 |
 | RRF k | 60 |
 | Chunk size / overlap | 1024 / 128 |
+| Parse tier | unset (`PARSE_TIER`; API default) |
+| Parse version | `latest` when a named tier is set |
 | Query rewriting | off (`num_queries=1`) |
 
 Datasets use **separate** indexes. Each question retrieves over **all documents in that dataset**, not the gold PDF only.

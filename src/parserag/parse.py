@@ -7,13 +7,22 @@ from pathlib import Path
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 
-from parserag.config import CHUNK_OVERLAP, CHUNK_SIZE, llama_cloud_api_key, parsed_dir
+from parserag.config import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    PARSE_TIER,
+    PARSE_VERSION,
+    llama_cloud_api_key,
+    parsed_dir,
+)
 
 log = logging.getLogger(__name__)
 
 
-def parse_to_nodes(dataset: str, doc_id: str, pdf_path: Path) -> list:
-    pages = load_pages(dataset, doc_id, pdf_path)
+def parse_to_nodes(
+    dataset: str, doc_id: str, pdf_path: Path, parse_tier: str | None = PARSE_TIER
+) -> list:
+    pages = load_pages(dataset, doc_id, pdf_path, parse_tier=parse_tier)
     documents = [
         Document(
             text=page["text"],
@@ -31,38 +40,45 @@ def parse_to_nodes(dataset: str, doc_id: str, pdf_path: Path) -> list:
     return nodes
 
 
-def load_pages(dataset: str, doc_id: str, pdf_path: Path) -> list[dict]:
-    cache = parsed_dir(dataset, doc_id) / "pages.json"
+def load_pages(
+    dataset: str, doc_id: str, pdf_path: Path, parse_tier: str | None = PARSE_TIER
+) -> list[dict]:
+    cache = parsed_dir(dataset, doc_id, parse_tier=parse_tier) / "pages.json"
     if cache.exists():
         return json.loads(cache.read_text(encoding="utf-8"))
     if not pdf_path.exists():
         raise FileNotFoundError(pdf_path)
     log.info("LlamaParse %s:%s", dataset, doc_id)
-    pages = _parse_pdf(pdf_path)
+    pages = _parse_pdf(pdf_path, parse_tier=parse_tier)
     cache.write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
     return pages
 
 
-def _parse_pdf(pdf_path: Path) -> list[dict]:
+def _parse_pdf(pdf_path: Path, parse_tier: str | None = PARSE_TIER) -> list[dict]:
     # JSON carries an explicit page number per page. The download includes layout
     # data, so a long filing can sit on this call for several minutes.
     log.info("Downloading LlamaParse JSON for %s", pdf_path.name)
-    raw = _llama_parse().get_json_result(str(pdf_path))
+    raw = _llama_parse(parse_tier).get_json_result(str(pdf_path))
     pages = _pages_from_json(raw)
     if not pages:
         raise RuntimeError(f"LlamaParse returned no pages for {pdf_path}")
     return pages
 
 
-def _llama_parse():
+def _llama_parse(parse_tier: str | None = PARSE_TIER):
     from llama_cloud_services import LlamaParse
 
-    return LlamaParse(
-        api_key=llama_cloud_api_key(),
-        result_type="markdown",
-        ignore_errors=False,
-        verbose=False,
-    )
+    kwargs = {
+        "api_key": llama_cloud_api_key(),
+        "result_type": "markdown",
+        "ignore_errors": False,
+        "verbose": False,
+        "tier": parse_tier,
+    }
+    # Named tiers require a version; omit both for the API's accurate default.
+    if parse_tier is not None:
+        kwargs["version"] = PARSE_VERSION
+    return LlamaParse(**kwargs)
 
 
 def _pages_from_json(raw) -> list[dict]:

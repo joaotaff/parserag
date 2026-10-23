@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,11 @@ FUSED_K = 8
 RRF_K = 60
 CHUNK_SIZE = 1024
 CHUNK_OVERLAP = 128
+# None leaves the API default (accurate). fast | cost_effective | agentic | agentic_plus
+PARSE_TIER = None
+PARSE_TIERS = ("fast", "cost_effective", "agentic", "agentic_plus")
+# Required by the API whenever a named tier is set.
+PARSE_VERSION = "latest"
 
 
 def openai_api_key() -> str:
@@ -52,14 +58,16 @@ def pdf_dir(dataset: str) -> Path:
     return path
 
 
-def parsed_dir(dataset: str, doc_id: str) -> Path:
-    path = PARSED_DIR / dataset / _safe_id(doc_id)
+def parsed_dir(dataset: str, doc_id: str, parse_tier: str | None = PARSE_TIER) -> Path:
+    root = PARSED_DIR / dataset
+    path = root / parse_tier / _safe_id(doc_id) if parse_tier else root / _safe_id(doc_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def index_dir(dataset: str) -> Path:
-    path = INDEX_DIR / dataset
+def index_dir(dataset: str, parse_tier: str | None = PARSE_TIER) -> Path:
+    root = INDEX_DIR / dataset
+    path = root / parse_tier if parse_tier else root
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -72,15 +80,20 @@ def run_paths(dataset: str, timestamp: str | None = None) -> tuple[Path, Path]:
     return path / f"{stem}.jsonl", path / f"{stem}.json"
 
 
-def latest_run_path(dataset: str) -> Path:
+def latest_run_path(dataset: str, parse_tier: str | None = PARSE_TIER) -> Path:
     path = RESULTS_DIR / dataset / "run"
     snapshots = sorted(path.glob(f"{dataset}_*.json"), key=lambda item: item.stat().st_mtime)
-    if snapshots:
-        return snapshots[-1]
+    for snapshot in reversed(snapshots):
+        payload = json.loads(snapshot.read_text(encoding="utf-8-sig"))
+        run_config = payload.get("run_config") if isinstance(payload, dict) else None
+        snapshot_tier = (run_config or {}).get("parse_tier")
+        if snapshot_tier == parse_tier:
+            return snapshot
     legacy = path / "predictions.jsonl"
-    if legacy.exists():
+    if parse_tier is None and legacy.exists():
         return legacy
-    raise FileNotFoundError(f"No run output for {dataset}. Run the dataset first.")
+    tier = parse_tier or "default"
+    raise FileNotFoundError(f"No {tier} parse-tier run output for {dataset}. Run the dataset first.")
 
 
 def eval_path(dataset: str, run_path: Path) -> Path:

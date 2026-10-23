@@ -1,5 +1,10 @@
 """RRF ranking + Recall@k oracle. Run: python tests/test_retrieval.py"""
 
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from parserag import config
 from parserag.eval_retrieval import score_predictions
 from parserag.index import drop_failure, record_failure
 from parserag.retrieve import rrf_fuse
@@ -98,10 +103,55 @@ def test_failure_list_replaces_and_drops() -> None:
     assert drop_failure(rows, "a") == [{"doc_id": "b", "error": "no text extracted"}]
 
 
+def test_named_tier_sends_parse_version() -> None:
+    from parserag.parse import _llama_parse
+
+    assert _llama_parse(None).version is None
+    assert _llama_parse("agentic").version == "latest"
+
+
+def test_parse_tier_paths_and_latest_run_are_isolated() -> None:
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        old_parsed, old_index, old_results = config.PARSED_DIR, config.INDEX_DIR, config.RESULTS_DIR
+        try:
+            config.PARSED_DIR = root / "parsed"
+            config.INDEX_DIR = root / "indexes"
+            config.RESULTS_DIR = root / "results"
+
+            assert config.parsed_dir("financebench", "doc") == root / "parsed/financebench/doc"
+            assert config.parsed_dir("financebench", "doc", "agentic") == (
+                root / "parsed/financebench/agentic/doc"
+            )
+            assert config.index_dir("financebench") == root / "indexes/financebench"
+            assert config.index_dir("financebench", "agentic") == (
+                root / "indexes/financebench/agentic"
+            )
+
+            run_dir = root / "results/financebench/run"
+            run_dir.mkdir(parents=True)
+            default_run = run_dir / "financebench_1.json"
+            agentic_run = run_dir / "financebench_2.json"
+            default_run.write_text(json.dumps({"run_config": {}, "results": []}))
+            agentic_run.write_text(
+                json.dumps({"run_config": {"parse_tier": "agentic"}, "results": []})
+            )
+            assert config.latest_run_path("financebench") == default_run
+            assert config.latest_run_path("financebench", "agentic") == agentic_run
+        finally:
+            config.PARSED_DIR, config.INDEX_DIR, config.RESULTS_DIR = (
+                old_parsed,
+                old_index,
+                old_results,
+            )
+
+
 if __name__ == "__main__":
     test_rrf_shared_doc_ranks_first()
     test_recall_at_k_page_and_doc()
     test_answer_and_ranked_retrieval_metrics()
     test_retrieval_only_records_skip_answer_metrics()
     test_failure_list_replaces_and_drops()
+    test_named_tier_sends_parse_version()
+    test_parse_tier_paths_and_latest_run_are_isolated()
     print("ok")

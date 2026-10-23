@@ -13,10 +13,14 @@ from parserag.config import (
     EMBED_MODEL,
     FUSED_K,
     LLM_MODEL,
+    PARSE_TIER,
+    PARSE_TIERS,
+    PARSE_VERSION,
     RETRIEVER_K,
     RRF_K,
     configure_llama_index,
     eval_path,
+    index_dir,
     latest_run_path,
     run_paths,
 )
@@ -38,22 +42,28 @@ def main(argv: list[str] | None = None) -> None:
     ingest.add_argument("--dataset", required=True, choices=["financebench", "dude"])
     ingest.add_argument("--limit", type=int, default=None, help="Max unique PDFs")
     ingest.add_argument("--rebuild", action="store_true")
+    ingest.add_argument("--parse-tier", choices=["none", *PARSE_TIERS], default=PARSE_TIER)
 
     run = sub.add_parser("run", help="Retrieve + generate checkpoint JSONL and snapshot JSON")
     run.add_argument("--dataset", required=True, choices=["financebench", "dude"])
     run.add_argument("--out", default=None, help="Snapshot JSON (a sibling JSONL checkpoint is also written)")
     run.add_argument("--limit", type=int, default=None, help="Max questions")
     run.add_argument("--no-generate", action="store_true", help="Retrieve without generating answers")
+    run.add_argument("--parse-tier", choices=["none", *PARSE_TIERS], default=PARSE_TIER)
 
     ev = sub.add_parser("eval", help="Score a run JSON/JSONL")
     ev.add_argument("--dataset", required=True, choices=["financebench", "dude"])
     ev.add_argument("--pred", default=None, help="Default: latest timestamped run JSON")
     ev.add_argument("--k", type=int, default=None)
     ev.add_argument("--out", default=None, help="Default: matching timestamped .metrics.json")
+    ev.add_argument("--parse-tier", choices=["none", *PARSE_TIERS], default=PARSE_TIER)
 
     args = parser.parse_args(argv)
+    parse_tier = None if args.parse_tier == "none" else args.parse_tier
     if args.cmd == "ingest":
-        failures = ingest_dataset(args.dataset, limit=args.limit, rebuild=args.rebuild)
+        failures = ingest_dataset(
+            args.dataset, limit=args.limit, rebuild=args.rebuild, parse_tier=parse_tier
+        )
         if failures:
             raise SystemExit(1)
     elif args.cmd == "run":
@@ -71,10 +81,11 @@ def main(argv: list[str] | None = None) -> None:
             timestamp,
             limit=args.limit,
             generate=not args.no_generate,
+            parse_tier=parse_tier,
         ):
             raise SystemExit(1)
     elif args.cmd == "eval":
-        pred = Path(args.pred) if args.pred else latest_run_path(args.dataset)
+        pred = Path(args.pred) if args.pred else latest_run_path(args.dataset, parse_tier)
         out = Path(args.out) if args.out else eval_path(args.dataset, pred)
         result = eval_file(pred, k=args.k)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -90,12 +101,13 @@ def cmd_run(
     timestamp: str,
     limit: int | None = None,
     generate: bool = True,
+    parse_tier: str | None = PARSE_TIER,
 ) -> int:
     """Write crash-safe JSONL during the run and a PageIndex-style JSON snapshot."""
     started = time.perf_counter()
     configure_llama_index()
     adapter = get_adapter(dataset)
-    index = load_index(dataset)
+    index = load_index(dataset, parse_tier=parse_tier)
     retriever = build_retriever(index)
     questions = adapter.iter_questions(limit=limit)
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +168,7 @@ def cmd_run(
         "model": LLM_MODEL,
         "answer_generation_enabled": generate,
         "embedding_model": EMBED_MODEL,
-        "index_dir": f"data/indexes/{dataset}",
+        "index_dir": str(index_dir(dataset, parse_tier)),
         "limit": limit,
         "question_count": len(questions),
         "retriever_k": RETRIEVER_K,
@@ -165,6 +177,8 @@ def cmd_run(
         "num_queries": 1,
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
+        "parse_tier": parse_tier,
+        "parse_version": PARSE_VERSION if parse_tier else None,
         "total_time_sec": total_time,
         "avg_retrieval_num": (
             sum(record["retrieval_num"] for record in results) / len(results) if results else 0.0

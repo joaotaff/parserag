@@ -9,31 +9,36 @@ from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
-from parserag.config import configure_llama_index, index_dir
+from parserag.config import PARSE_TIER, configure_llama_index, index_dir
 from parserag.datasets import get_adapter
 from parserag.parse import parse_to_nodes
 
 log = logging.getLogger(__name__)
 
 
-def ingest_dataset(name: str, limit: int | None = None, rebuild: bool = False) -> list[dict]:
+def ingest_dataset(
+    name: str,
+    limit: int | None = None,
+    rebuild: bool = False,
+    parse_tier: str | None = PARSE_TIER,
+) -> list[dict]:
     """Index the dataset. Returns parse failures still outstanding."""
     configure_llama_index()
     adapter = get_adapter(name)
     adapter.prepare_pdfs(limit=limit)
     docs = adapter.iter_documents(limit=limit)
-    index, indexed = load_or_create_index(name, rebuild=rebuild)
-    failures = [] if rebuild else _load_failures(_paths(name)["failures"])
+    index, indexed = load_or_create_index(name, rebuild=rebuild, parse_tier=parse_tier)
+    failures = [] if rebuild else _load_failures(_paths(name, parse_tier)["failures"])
     for doc in docs:
         if not rebuild and doc.doc_id in indexed:
             log.info("Skip already indexed %s", doc.doc_id)
             continue
         try:
-            nodes = parse_to_nodes(name, doc.doc_id, doc.pdf_path)
+            nodes = parse_to_nodes(name, doc.doc_id, doc.pdf_path, parse_tier=parse_tier)
         except Exception as exc:
             log.exception("Parse failed for %s:%s — skipping", name, doc.doc_id)
             failures = record_failure(failures, doc.doc_id, f"{type(exc).__name__}: {exc}")
-            _write_failures(name, failures)
+            _write_failures(name, failures, parse_tier)
             continue
         if not nodes:
             log.error("No text extracted for %s:%s", name, doc.doc_id)
@@ -42,15 +47,15 @@ def ingest_dataset(name: str, limit: int | None = None, rebuild: bool = False) -
                 doc.doc_id,
                 "no text extracted; delete its pages.json cache to force a reparse",
             )
-            _write_failures(name, failures)
+            _write_failures(name, failures, parse_tier)
             continue
         index.insert_nodes(nodes)
         indexed.add(doc.doc_id)
         failures = drop_failure(failures, doc.doc_id)
-        _persist(name, index, indexed)
-        _write_failures(name, failures)
+        _persist(name, index, indexed, parse_tier)
+        _write_failures(name, failures, parse_tier)
         log.info("Indexed %s (%d nodes)", doc.doc_id, len(nodes))
-    _report_failures(name, failures)
+    _report_failures(name, failures, parse_tier)
     return failures
 
 
@@ -64,24 +69,29 @@ def drop_failure(rows: list[dict], doc_id: str) -> list[dict]:
     return [row for row in rows if row["doc_id"] != doc_id]
 
 
-def load_index(name: str) -> VectorStoreIndex:
+def load_index(name: str, parse_tier: str | None = PARSE_TIER) -> VectorStoreIndex:
     configure_llama_index()
-    paths = _paths(name)
+    paths = _paths(name, parse_tier)
     if not paths["docstore"].exists():
-        raise FileNotFoundError(f"No index for {name}. Run ingest first.")
-    index, _ = _open_index(name)
+        tier = parse_tier or "default"
+        raise FileNotFoundError(f"No {tier} parse index for {name}. Run ingest first.")
+    index, _ = _open_index(name, parse_tier=parse_tier)
     if not index.docstore.docs:
         raise RuntimeError(f"Docstore for {name} has no nodes. Re-run ingest.")
     return index
 
 
-def load_or_create_index(name: str, rebuild: bool = False) -> tuple[VectorStoreIndex, set[str]]:
-    return _open_index(name, rebuild=rebuild)
+def load_or_create_index(
+    name: str, rebuild: bool = False, parse_tier: str | None = PARSE_TIER
+) -> tuple[VectorStoreIndex, set[str]]:
+    return _open_index(name, rebuild=rebuild, parse_tier=parse_tier)
 
 
-def _open_index(name: str, rebuild: bool = False) -> tuple[VectorStoreIndex, set[str]]:
+def _open_index(
+    name: str, rebuild: bool = False, parse_tier: str | None = PARSE_TIER
+) -> tuple[VectorStoreIndex, set[str]]:
     # from_vector_store() discards storage_context, so BM25 would see an empty docstore.
-    paths = _paths(name)
+    paths = _paths(name, parse_tier)
     if rebuild:
         _clear_index(paths)
     db = chromadb.PersistentClient(path=str(paths["chroma"]))
@@ -98,14 +108,19 @@ def _open_index(name: str, rebuild: bool = False) -> tuple[VectorStoreIndex, set
     return index, indexed
 
 
-def _persist(name: str, index: VectorStoreIndex, indexed: set[str]) -> None:
-    paths = _paths(name)
+def _persist(
+    name: str,
+    index: VectorStoreIndex,
+    indexed: set[str],
+    parse_tier: str | None = PARSE_TIER,
+) -> None:
+    paths = _paths(name, parse_tier)
     index.docstore.persist(persist_path=str(paths["docstore"]))
     paths["manifest"].write_text(json.dumps(sorted(indexed)), encoding="utf-8")
 
 
-def _paths(name: str) -> dict[str, Path]:
-    root = index_dir(name)
+def _paths(name: str, parse_tier: str | None = PARSE_TIER) -> dict[str, Path]:
+    root = index_dir(name, parse_tier)
     return {
         "chroma": root / "chroma",
         "docstore": root / "docstore.json",
@@ -126,19 +141,23 @@ def _load_failures(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _write_failures(name: str, failures: list[dict]) -> None:
-    path = _paths(name)["failures"]
+def _write_failures(
+    name: str, failures: list[dict], parse_tier: str | None = PARSE_TIER
+) -> None:
+    path = _paths(name, parse_tier)["failures"]
     if failures:
         path.write_text(json.dumps(failures, indent=2), encoding="utf-8")
     elif path.exists():
         path.unlink()
 
 
-def _report_failures(name: str, failures: list[dict]) -> None:
+def _report_failures(
+    name: str, failures: list[dict], parse_tier: str | None = PARSE_TIER
+) -> None:
     if not failures:
         log.info("Ingest finished with no outstanding parse failures")
         return
-    path = _paths(name)["failures"]
+    path = _paths(name, parse_tier)["failures"]
     lines = "\n".join(f"  {row['doc_id']}: {row['error']}" for row in failures)
     log.error("Ingest finished with %d parse failure(s). See %s\n%s", len(failures), path, lines)
 

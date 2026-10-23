@@ -4,10 +4,10 @@
 
 How a PDF becomes `pages.json` and then nodes is described in `docs/parsing.md`.
 
-`data/parsed/{dataset}/{doc_id}/pages.json` stores `[{page, text}, ...]` markdown pages.
+The default accurate parse uses `data/parsed/{dataset}/{doc_id}/pages.json`. A named tier uses `data/parsed/{dataset}/{tier}/{doc_id}/pages.json`. Each stores `[{page, text}, ...]` markdown pages.
 
 - A cache hit never calls LlamaParse.
-- A parse that raises is not cached. Ingest records it in `data/indexes/{dataset}/failures.json`, continues, and exits with status 1. The next ingest retries that PDF.
+- A parse that raises is not cached. Ingest records it in the selected tier's `failures.json`, continues, and exits with status 1. The next ingest for that tier retries that PDF.
 - A parse that returns no text is cached and listed in the same file. Delete that doc's `pages.json` to force a reparse.
 - The command exits 0 only when `failures.json` is absent. Re-running ingest after a partial DUDE run only pays for uncached files.
 
@@ -15,7 +15,7 @@ LlamaParse is requested as a JSON result. Each page's markdown is stored with th
 
 ## Chroma + BM25
 
-Each dataset gets `data/indexes/{dataset}/`:
+The default accurate parse uses `data/indexes/{dataset}/`. A named tier uses `data/indexes/{dataset}/{tier}/`. Each root contains:
 
 - `chroma/` — `PersistentClient` collection named after the dataset (dense vectors only).
 - `docstore.json` — LlamaIndex `SimpleDocumentStore` with the same node text BM25 needs.
@@ -25,3 +25,5 @@ Each dataset gets `data/indexes/{dataset}/`:
 The docstore is the source of truth for `BM25Retriever`. Reload it with `VectorStoreIndex(nodes=[], storage_context=...)`. `from_vector_store()` drops the docstore, and BM25 then indexes an empty corpus.
 
 On ingest, nodes are inserted incrementally and the docstore/manifest are persisted after each PDF.
+
+`--parse-tier {fast,cost_effective,agentic,agentic_plus}` selects both roots. Omitting it or passing `--parse-tier none` selects the existing default paths. `--rebuild` clears only the selected tier's index and keeps its parse cache.

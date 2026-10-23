@@ -3,17 +3,17 @@
 Ingest turns each PDF into LlamaIndex nodes before anything is embedded. The work is in `src/parserag/parse.py`, called from `ingest_dataset` in `src/parserag/index.py`.
 
 ```
-PDF -> LlamaParse JSON -> data/parsed/{dataset}/{doc_id}/pages.json
+PDF -> LlamaParse JSON -> data/parsed/{dataset}/[{tier}/]{doc_id}/pages.json
      -> drop blank pages -> SentenceSplitter -> nodes with dataset, doc_id, page
 ```
 
-A later ingest of a doc already listed in `data/indexes/{dataset}/indexed.json` skips this path. `--rebuild` clears that manifest and reparses from the cache, which still avoids a new LlamaParse job.
+A later ingest of a doc already listed in the selected tier's `indexed.json` skips this path. `--rebuild` clears that tier's manifest and reparses from its cache, which still avoids a new LlamaParse job.
 
 ## LlamaParse
 
 `load_pages` returns the cache when `pages.json` exists. Otherwise `_llama_parse()` builds a `LlamaParse` client and calls `get_json_result`. The client needs `LLAMA_CLOUD_API_KEY`.
 
-`_llama_parse()` passes `api_key`, `result_type="markdown"`, `ignore_errors=False`, and `verbose=False`. Every other field below is the default from `llama-cloud-services` 0.6.94. `base_url` uses `LLAMA_CLOUD_BASE_URL` when that variable is set.
+`_llama_parse()` passes `api_key`, `result_type="markdown"`, `ignore_errors=False`, `verbose=False`, and the CLI-selected tier. Named tiers also send `version=PARSE_VERSION` (`"latest"`); the API rejects a tier without a version. `--parse-tier` accepts `fast`, `cost_effective`, `agentic`, and `agentic_plus`; omitting it or passing `none` leaves both `tier` and `version` unset for the API's accurate default. Every other field below is the default from `llama-cloud-services` 0.6.94. `base_url` uses `LLAMA_CLOUD_BASE_URL` when that variable is set. Runs record `parse_tier` and `parse_version` on `run_config`.
 
 ### Client
 
@@ -137,8 +137,8 @@ A later ingest of a doc already listed in `data/indexes/{dataset}/indexed.json` 
 | `page_footer_prefix` | `None` |
 | `extract_printed_page_number` | `None` |
 | `line_level_bounding_box` | `False` |
-| `tier` | `None` |
-| `version` | `None` |
+| `tier` | CLI-selected; `None` by default (`PARSE_TIER`) |
+| `version` | `"latest"` when a named tier is set; else `None` |
 
 ### Deprecated
 
@@ -177,6 +177,6 @@ If every page was blank, the node list is empty. That `pages.json` stays on disk
 
 ## Failures during ingest
 
-`ingest_dataset` parses one PDF at a time. On an exception it logs the doc, appends `{doc_id, error}` to `data/indexes/{dataset}/failures.json`, and continues. The command exits 1 while that file exists. The next ingest retries docs that are not in `indexed.json`.
+`ingest_dataset` parses one PDF at a time. On an exception it logs the doc, appends `{doc_id, error}` to the selected tier's `failures.json`, and continues. The command exits 1 while that file exists. The next ingest for that tier retries docs that are not in its `indexed.json`.
 
 A successful index of a previously failed doc removes it from `failures.json`. When the list is empty, the file is deleted.
